@@ -1,7 +1,7 @@
-import { createElement, icons } from "lucide";
 import { ORDER_TYPES } from "../game/constants.js";
-import { board, coordKey, getBoardBounds, getHexCenter, getHexPoints, sameCoord } from "../game/hex.js";
+import { createBoard, coordKey, getBoardBounds, getHexCenter, getHexPoints, sameCoord } from "../game/hex.js";
 import { getOrder, unitAt, unitCoord } from "../game/state.js";
+import { renderIcon } from "./icons.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -16,7 +16,8 @@ const ICON_BY_ORDER = {
 export function renderBoard(container, state, handlers) {
   container.replaceChildren();
 
-  const bounds = getBoardBounds();
+  const board = createBoard(state.scenario.map);
+  const bounds = getBoardBounds(board);
   const svg = svgEl("svg", {
     class: "board-svg",
     viewBox: `${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`,
@@ -48,7 +49,7 @@ export function renderBoard(container, state, handlers) {
     cellsLayer.append(polygon);
 
     if (unit) {
-      unitsLayer.append(renderUnit(coord, unit, getOrder(state, unit.id), isSelected));
+      unitsLayer.append(renderUnit(coord, unit, getOrder(state, unit.id), isSelected, board));
     }
   }
 
@@ -58,7 +59,7 @@ export function renderBoard(container, state, handlers) {
       continue;
     }
 
-    arrowsLayer.append(renderOrderArrow(unitCoord(unit), order.target, unit.team));
+    arrowsLayer.append(renderOrderArrow(unitCoord(unit), order.target, unit.team, board));
   }
 
   svg.append(arrowsLayer, cellsLayer, unitsLayer);
@@ -84,8 +85,8 @@ function createDefs() {
   return defs;
 }
 
-function renderUnit(coord, unit, order, isSelected) {
-  const center = getHexCenter(coord);
+function renderUnit(coord, unit, order, isSelected, board) {
+  const center = getHexCenter(coord, board);
   const group = svgEl("g", {
     class: `unit-token ${unit.team}${unit.exposed ? " exposed" : ""}${isSelected ? " selected" : ""}`,
   });
@@ -103,9 +104,9 @@ function renderUnit(coord, unit, order, isSelected) {
   return group;
 }
 
-function renderOrderArrow(from, to, team) {
-  const start = getHexCenter(from);
-  const end = getHexCenter(to);
+function renderOrderArrow(from, to, team, board) {
+  const start = getHexCenter(from, board);
+  const end = getHexCenter(to, board);
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const length = Math.hypot(dx, dy);
@@ -127,11 +128,6 @@ function renderOrderArrow(from, to, team) {
     class: `order-arrow ${team}`,
     "marker-end": "url(#order-arrow)",
   });
-}
-
-function renderIcon(name) {
-  const iconNode = icons[name] ?? icons.Circle;
-  return createElement(iconNode);
 }
 
 function getHexClass(unit, isSelected) {

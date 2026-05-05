@@ -1,3 +1,4 @@
+import { chooseOrders } from "../ai/chooseOrders.js";
 import { ORDER_TYPES } from "./constants.js";
 import { resolveTurn } from "./resolveTurn.js";
 import { createInitialAppState, getUnit } from "./state.js";
@@ -6,6 +7,7 @@ export const ACTIONS = {
   SELECT_UNIT: "SELECT_UNIT",
   OPEN_ACTION_WHEEL: "OPEN_ACTION_WHEEL",
   CLOSE_ACTION_WHEEL: "CLOSE_ACTION_WHEEL",
+  CANCEL_INTERACTION: "CANCEL_INTERACTION",
   BEGIN_TARGETING: "BEGIN_TARGETING",
   SET_ORDER: "SET_ORDER",
   SET_TEAM_ORDERS: "SET_TEAM_ORDERS",
@@ -43,6 +45,13 @@ export function appReducer(appState, action) {
         actionWheel: null,
       });
 
+    case ACTIONS.CANCEL_INTERACTION:
+      return withPresent(appState, {
+        ...appState.present,
+        actionWheel: null,
+        targetingOrder: null,
+      });
+
     case ACTIONS.BEGIN_TARGETING:
       return withPresent(appState, {
         ...appState.present,
@@ -73,7 +82,7 @@ export function appReducer(appState, action) {
       return jumpToHistory(appState, action.index);
 
     case ACTIONS.RESET_GAME:
-      return createInitialAppState();
+      return createInitialAppState(appState.present.scenario);
 
     default:
       return appState;
@@ -127,12 +136,49 @@ function setTeamOrders(appState, action) {
 }
 
 function commitTurn(appState) {
-  const nextPresent = resolveTurn(appState.present);
+  if (appState.present.status.phase === "complete") {
+    return appState;
+  }
+
+  const presentWithAiOrders = issueScenarioAiOrders(appState.present);
+  const nextPresent = resolveTurn(presentWithAiOrders);
 
   return {
-    past: [...appState.past, stripUiState(appState.present)],
+    past: [...appState.past, stripUiState(presentWithAiOrders)],
     present: nextPresent,
     future: [],
+  };
+}
+
+function issueScenarioAiOrders(state) {
+  const aiOrders = Object.entries(state.scenario.controllers ?? {}).reduce((orders, [team, controller]) => {
+    if (controller.type !== "ai" || controller.ai !== "basic-heuristic") {
+      return orders;
+    }
+
+    return {
+      ...orders,
+      ...chooseOrders(
+        {
+          ...state,
+          orders: {
+            ...state.orders,
+            ...orders,
+          },
+        },
+        team,
+      ),
+    };
+  }, {});
+
+  return {
+    ...state,
+    actionWheel: null,
+    targetingOrder: null,
+    orders: {
+      ...state.orders,
+      ...aiOrders,
+    },
   };
 }
 

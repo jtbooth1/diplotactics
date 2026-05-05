@@ -8,9 +8,10 @@ export function generateLegalOrdersForUnit(state, unit) {
   }
 
   const from = unitCoord(unit);
+  const mapSpec = state.scenario.map;
   const orders = [
     { type: ORDER_TYPES.HOLD },
-    ...adjacentCoords(from).map((target) => ({ type: ORDER_TYPES.MOVE, target })),
+    ...adjacentCoords(from, mapSpec).map((target) => ({ type: ORDER_TYPES.MOVE, target })),
   ];
 
   if (unit.exposed) {
@@ -19,9 +20,9 @@ export function generateLegalOrdersForUnit(state, unit) {
   }
 
   orders.push(
-    ...adjacentCoords(from).map((target) => ({ type: ORDER_TYPES.ATTACK, target })),
+    ...adjacentCoords(from, mapSpec).map((target) => ({ type: ORDER_TYPES.ATTACK, target })),
     { type: ORDER_TYPES.COVER, target: from },
-    ...adjacentCoords(from).map((target) => ({ type: ORDER_TYPES.COVER, target })),
+    ...adjacentCoords(from, mapSpec).map((target) => ({ type: ORDER_TYPES.COVER, target })),
   );
 
   return dedupeOrders(orders);
@@ -36,8 +37,8 @@ export function generateLegalOrdersForTeam(state, team) {
     }));
 }
 
-function adjacentCoords(coord) {
-  return DIRECTIONS.map((direction) => addCoord(coord, direction)).filter(isOnBoard);
+function adjacentCoords(coord, mapSpec) {
+  return DIRECTIONS.map((direction) => addCoord(coord, direction)).filter((target) => isOnBoard(target, mapSpec));
 }
 
 function dedupeOrders(orders) {

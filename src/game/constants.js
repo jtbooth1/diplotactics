@@ -18,5 +18,3 @@ export const ACTION_LABELS = {
   [ORDER_TYPES.RECOVER]: "Recover",
   [ORDER_TYPES.HOLD]: "Hold",
 };
-
-export const BOARD_RADIUS = 3;

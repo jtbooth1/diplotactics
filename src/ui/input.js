@@ -1,10 +1,19 @@
-import { chooseOrders } from "../ai/chooseOrders.js";
 import { ACTIONS } from "../game/reducer.js";
-import { ACTION_LABELS, ORDER_TYPES, TEAMS } from "../game/constants.js";
+import { ACTION_LABELS, ORDER_TYPES } from "../game/constants.js";
 import { isAdjacent, isSelfOrAdjacent } from "../game/hex.js";
 import { aliveUnits, getOrder, getUnit, unitAt, unitCoord } from "../game/state.js";
+import { createRadialMenu } from "./radialMenu.js";
 
 const TARGETED_ACTIONS = new Set([ORDER_TYPES.MOVE, ORDER_TYPES.ATTACK, ORDER_TYPES.COVER]);
+const ICON_BY_ORDER = {
+  [ORDER_TYPES.MOVE]: "Footprints",
+  [ORDER_TYPES.ATTACK]: "Swords",
+  [ORDER_TYPES.COVER]: "Shield",
+  [ORDER_TYPES.RECOVER]: "RotateCcw",
+  [ORDER_TYPES.HOLD]: "Circle",
+};
+const ACTION_MENU_SIZE = 192;
+const ACTION_MENU_MARGIN = 12;
 
 export function createBoardHandlers(state, dispatch) {
   return {
@@ -39,7 +48,7 @@ export function createBoardHandlers(state, dispatch) {
   };
 }
 
-export function renderControls(container, appState, dispatch) {
+export function renderControls(container, appState, dispatch, scenarioOptions = {}) {
   const state = appState.present;
   const selectedUnit = getUnit(state, state.selectedUnitId);
   const timelineLength = appState.past.length + 1 + appState.future.length;
@@ -47,6 +56,7 @@ export function renderControls(container, appState, dispatch) {
 
   container.replaceChildren();
   container.append(
+    renderScenarioPanel(state.scenario.id, scenarioOptions),
     renderTurnPanel(state, dispatch),
     renderRoster(state, selectedUnit, dispatch),
     renderReplayPanel(timelineLength, currentIndex, dispatch),
@@ -69,46 +79,60 @@ export function renderActionWheel(container, state, dispatch) {
   const wheel = el("div", {
     className: "action-wheel",
   });
-  wheel.style.left = `${state.actionWheel.x}px`;
-  wheel.style.top = `${state.actionWheel.y}px`;
+  const position = clampActionWheelPosition(state.actionWheel.x, state.actionWheel.y);
+  wheel.style.left = `${position.x}px`;
+  wheel.style.top = `${position.y}px`;
 
-  for (const [index, actionType] of Object.values(ORDER_TYPES).entries()) {
-    const disabled = unit.exposed && (actionType === ORDER_TYPES.ATTACK || actionType === ORDER_TYPES.COVER);
-    const button = el("button", {
-      className: "wheel-action",
-      textContent: ACTION_LABELS[actionType],
-      disabled,
-      onclick: (event) => {
-        event.stopPropagation();
-
-        if (TARGETED_ACTIONS.has(actionType)) {
-          dispatch({
-            type: ACTIONS.BEGIN_TARGETING,
-            unitId: unit.id,
-            orderType: actionType,
-          });
-          return;
-        }
-
+  const menu = createRadialMenu({
+    className: `action-radial ${unit.team}`,
+    label: `Actions for ${unit.name}`,
+    centerLabel: unit.name,
+    size: ACTION_MENU_SIZE,
+    items: Object.values(ORDER_TYPES).map((actionType) => ({
+      id: actionType,
+      icon: ICON_BY_ORDER[actionType],
+      label: ACTION_LABELS[actionType],
+      disabled: unit.exposed && (actionType === ORDER_TYPES.ATTACK || actionType === ORDER_TYPES.COVER),
+    })),
+    onSelect: (item) => {
+      if (TARGETED_ACTIONS.has(item.id)) {
         dispatch({
-          type: ACTIONS.SET_ORDER,
+          type: ACTIONS.BEGIN_TARGETING,
           unitId: unit.id,
-          orderType: actionType,
+          orderType: item.id,
         });
-      },
-    });
+        return;
+      }
 
-    const angle = -90 + index * 72;
-    button.style.setProperty("--angle", `${angle}deg`);
-    wheel.append(button);
+      dispatch({
+        type: ACTIONS.SET_ORDER,
+        unitId: unit.id,
+        orderType: item.id,
+      });
+    },
+  });
+
+  wheel.append(menu);
+  container.append(wheel);
+}
+
+function clampActionWheelPosition(x, y) {
+  const radius = ACTION_MENU_SIZE / 2;
+  return {
+    x: clampToViewport(x, radius, window.innerWidth),
+    y: clampToViewport(y, radius, window.innerHeight),
+  };
+}
+
+function clampToViewport(value, radius, viewportSize) {
+  const min = radius + ACTION_MENU_MARGIN;
+  const max = viewportSize - radius - ACTION_MENU_MARGIN;
+
+  if (max < min) {
+    return viewportSize / 2;
   }
 
-  const label = el("div", {
-    className: `wheel-center ${unit.team}`,
-    textContent: unit.name,
-  });
-  wheel.append(label);
-  container.append(wheel);
+  return Math.min(Math.max(value, min), max);
 }
 
 function renderTurnPanel(state, dispatch) {
@@ -123,19 +147,19 @@ function renderTurnPanel(state, dispatch) {
     }),
   );
 
-  if (state.targetingOrder) {
-    const unit = getUnit(state, state.targetingOrder.unitId);
-    panel.append(
-      el("p", {
-        className: "targeting-hint",
-        textContent: `Choose ${ACTION_LABELS[state.targetingOrder.orderType].toLowerCase()} target for ${unit?.name ?? "unit"}.`,
-      }),
-    );
-  }
+  const targetingUnit = state.targetingOrder ? getUnit(state, state.targetingOrder.unitId) : null;
+  const gameOver = state.status.phase === "complete";
+  panel.append(
+    el("p", {
+      className: state.targetingOrder || gameOver ? "targeting-hint" : "targeting-hint hidden",
+      textContent: getTurnHintText(state, targetingUnit),
+    }),
+  );
 
-  const resolveButton = el("button", {
+  const endTurnButton = el("button", {
     className: "primary-button",
-    textContent: "Resolve Turn",
+    textContent: gameOver ? "Game Over" : "End Turn",
+    disabled: gameOver,
     onclick: () => dispatch({ type: ACTIONS.COMMIT_TURN }),
   });
 
@@ -145,21 +169,45 @@ function renderTurnPanel(state, dispatch) {
     onclick: () => dispatch({ type: ACTIONS.RESET_GAME }),
   });
 
-  const aiButton = el("button", {
-    className: "ghost-button",
-    textContent: "AI Orders for Red",
-    onclick: () =>
-      dispatch({
-        type: ACTIONS.SET_TEAM_ORDERS,
-        team: TEAMS.RED,
-        orders: chooseOrders(state, TEAMS.RED),
-      }),
-  });
-
   const row = el("div", { className: "button-row" });
-  row.append(resolveButton, resetButton);
-  panel.append(row, aiButton);
+  row.append(endTurnButton, resetButton);
+  panel.append(row);
   return panel;
+}
+
+function renderScenarioPanel(activeScenarioId, { scenarios = [], onScenarioSelect } = {}) {
+  const panel = el("section", { className: "panel scenario-panel" });
+  panel.append(el("h2", { textContent: "Scenarios" }));
+
+  const list = el("div", { className: "scenario-list" });
+  for (const scenario of scenarios) {
+    list.append(
+      el("button", {
+        className: scenario.id === activeScenarioId ? "scenario-button selected" : "scenario-button",
+        textContent: scenario.name,
+        onclick: () => onScenarioSelect?.(scenario.id),
+      }),
+    );
+  }
+
+  panel.append(list);
+  return panel;
+}
+
+function getTurnHintText(state, targetingUnit) {
+  if (state.status.phase === "complete") {
+    return state.status.winner === "draw" ? "Elimination draw." : `${capitalize(state.status.winner)} wins by elimination.`;
+  }
+
+  if (state.targetingOrder) {
+    return `Choose ${ACTION_LABELS[state.targetingOrder.orderType].toLowerCase()} target for ${targetingUnit?.name ?? "unit"}.`;
+  }
+
+  return "No target selection active.";
+}
+
+function capitalize(value) {
+  return value[0].toUpperCase() + value.slice(1);
 }
 
 function renderRoster(state, selectedUnit, dispatch) {

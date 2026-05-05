@@ -1,30 +1,24 @@
 import { ORDER_TYPES, TEAMS } from "./constants.js";
+import { defaultScenario } from "../scenarios/index.js";
 
-export function createInitialGameState() {
+export function createInitialGameState(scenario = defaultScenario) {
   return {
+    scenario,
+    status: createInitialStatus(scenario),
     turn: 1,
-    selectedUnitId: "b1",
+    selectedUnitId: scenario.units.find((unit) => unit.team === TEAMS.BLUE)?.id ?? scenario.units[0]?.id ?? null,
     actionWheel: null,
     targetingOrder: null,
     orders: {},
     log: ["Issue orders for both sides, then resolve the turn."],
-    units: [
-      createUnit("b1", "Blue 1", TEAMS.BLUE, -3, 1),
-      createUnit("b2", "Blue 2", TEAMS.BLUE, -2, 0),
-      createUnit("b3", "Blue 3", TEAMS.BLUE, -2, 2),
-      createUnit("b4", "Blue 4", TEAMS.BLUE, -1, -1),
-      createUnit("b5", "Blue 5", TEAMS.BLUE, -1, 1),
-      createUnit("r1", "Red 1", TEAMS.RED, 3, -1),
-      createUnit("r2", "Red 2", TEAMS.RED, 2, 0),
-      createUnit("r3", "Red 3", TEAMS.RED, 2, -2),
-      createUnit("r4", "Red 4", TEAMS.RED, 1, 1),
-      createUnit("r5", "Red 5", TEAMS.RED, 1, -1),
-    ],
+    units: scenario.units.map((unit) =>
+      createUnit(unit.id, unit.name, unit.team, unit.q, unit.r, unit.type),
+    ),
   };
 }
 
-export function createInitialAppState() {
-  const present = createInitialGameState();
+export function createInitialAppState(scenario = defaultScenario) {
+  const present = createInitialGameState(scenario);
 
   return {
     past: [],
@@ -33,15 +27,25 @@ export function createInitialAppState() {
   };
 }
 
-export function createUnit(id, name, team, q, r) {
+export function createUnit(id, name, team, q, r, type = "infantry") {
   return {
     id,
     name,
     team,
+    type,
     q,
     r,
     exposed: false,
     alive: true,
+  };
+}
+
+function createInitialStatus(scenario) {
+  return {
+    phase: "playing",
+    winner: null,
+    reason: null,
+    scores: Object.fromEntries(Object.keys(scenario.controllers ?? {}).map((team) => [team, 0])),
   };
 }
 

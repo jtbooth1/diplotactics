@@ -3,17 +3,23 @@ import { coordKey, isAdjacent, isOnBoard, isSelfOrAdjacent, sameCoord } from "./
 import { aliveUnits, getOrder, unitCoord } from "./state.js";
 
 export function resolveTurn(state) {
+  if (state.status.phase === "complete") {
+    return state;
+  }
+
   const liveUnits = aliveUnits(state);
   const unitsById = new Map(liveUnits.map((unit) => [unit.id, unit]));
   const startOccupancy = new Map(liveUnits.map((unit) => [coordKey(unitCoord(unit)), unit.id]));
   const normalizedOrders = normalizeOrders(state, liveUnits);
-  const movement = resolveMovement(liveUnits, normalizedOrders, startOccupancy, unitsById);
+  const movement = resolveMovement(liveUnits, normalizedOrders, startOccupancy, unitsById, state.scenario.map);
   const movedUnits = applyMovement(state.units, movement.successes, normalizedOrders);
   const combat = resolveCombat(movedUnits, normalizedOrders);
 
   const nextUnits = movedUnits
     .map((unit) => applyCombat(unit, combat))
     .filter((unit) => unit.alive);
+  const status = evaluateVictory(state, nextUnits);
+  const log = buildTurnLog(state.turn, movement, combat, status);
 
   return {
     ...state,
@@ -23,7 +29,8 @@ export function resolveTurn(state) {
     actionWheel: null,
     targetingOrder: null,
     units: nextUnits,
-    log: buildTurnLog(state.turn, movement, combat),
+    status,
+    log,
   };
 }
 
@@ -44,7 +51,7 @@ function normalizeOrders(state, units) {
   return orders;
 }
 
-function resolveMovement(units, orders, startOccupancy, unitsById) {
+function resolveMovement(units, orders, startOccupancy, unitsById, mapSpec) {
   const candidateMoves = new Map();
   const failures = new Map();
 
@@ -55,7 +62,7 @@ function resolveMovement(units, orders, startOccupancy, unitsById) {
       continue;
     }
 
-    if (!order.target || !isAdjacent(unitCoord(unit), order.target) || !isOnBoard(order.target)) {
+    if (!order.target || !isAdjacent(unitCoord(unit), order.target) || !isOnBoard(order.target, mapSpec)) {
       failures.set(unit.id, "invalid move");
       continue;
     }
@@ -195,13 +202,12 @@ function resolveCombat(units, orders) {
 
     const netHits = Math.max(0, attackCount - (covers.get(targetKey) ?? 0));
     const target = aliveMovedUnits.find((unit) => unit.id === targetUnitId);
-    const effectiveExposure = recoveries.has(targetUnitId) ? false : target.exposed;
 
     if (netHits === 0) {
       continue;
     }
 
-    if (effectiveExposure || netHits >= 2) {
+    if (target.exposed || netHits >= 2) {
       killed.add(targetUnitId);
     } else {
       wounds.set(targetUnitId, true);
@@ -231,7 +237,37 @@ function applyCombat(unit, combat) {
   return unit;
 }
 
-function buildTurnLog(turn, movement, combat) {
+function evaluateVictory(state, units) {
+  if (state.scenario.rules.type !== "elimination") {
+    return state.status;
+  }
+
+  const startingTeams = [...new Set(state.scenario.units.map((unit) => unit.team))];
+  const aliveTeams = new Set(units.map((unit) => unit.team));
+  const survivingTeams = startingTeams.filter((team) => aliveTeams.has(team));
+
+  if (survivingTeams.length === 1) {
+    return {
+      ...state.status,
+      phase: "complete",
+      winner: survivingTeams[0],
+      reason: "elimination",
+    };
+  }
+
+  if (survivingTeams.length === 0) {
+    return {
+      ...state.status,
+      phase: "complete",
+      winner: "draw",
+      reason: "elimination",
+    };
+  }
+
+  return state.status;
+}
+
+function buildTurnLog(turn, movement, combat, status) {
   const moved = [...movement.successes].length;
   const blocked = [...movement.failures.entries()].map(([unitId, reason]) => `${unitId}: ${reason}`);
   const exposed = [...combat.wounds.keys()];
@@ -243,5 +279,14 @@ function buildTurnLog(turn, movement, combat) {
     blocked.length ? `Blocked moves: ${blocked.join(", ")}.` : "No movement blocks.",
     exposed.length ? `Exposed: ${exposed.join(", ")}.` : "No new exposures.",
     killed.length ? `Killed: ${killed.join(", ")}.` : "No deaths.",
-  ];
+    status.phase === "complete" ? `${formatWinner(status.winner)} wins by elimination.` : null,
+  ].filter(Boolean);
+}
+
+function formatWinner(winner) {
+  if (winner === "draw") {
+    return "Nobody";
+  }
+
+  return winner[0].toUpperCase() + winner.slice(1);
 }

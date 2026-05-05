@@ -1,13 +1,10 @@
-import { Grid, Orientation, defineHex, spiral } from "honeycomb-grid";
-import { BOARD_RADIUS } from "./constants.js";
+import { Grid, Orientation, defineHex, rectangle } from "honeycomb-grid";
 
 export const HexTile = defineHex({
   dimensions: 48,
   orientation: Orientation.POINTY,
   origin: "topLeft",
 });
-
-export const board = new Grid(HexTile, spiral({ radius: BOARD_RADIUS }));
 
 export const DIRECTIONS = [
   { q: 1, r: 0 },
@@ -17,6 +14,21 @@ export const DIRECTIONS = [
   { q: -1, r: 1 },
   { q: 0, r: 1 },
 ];
+
+export function createBoard(mapSpec) {
+  if (mapSpec.shape === "hex") {
+    return new Grid(HexTile, hexagonCoordinates(mapSpec.radius ?? 3, mapSpec.center ?? { q: 0, r: 0 }));
+  }
+
+  return new Grid(
+    HexTile,
+    rectangle({
+      start: mapSpec.start ?? { q: 0, r: 0 },
+      width: mapSpec.width,
+      height: mapSpec.height,
+    }),
+  );
+}
 
 export function coordKey(coord) {
   return `${coord.q},${coord.r}`;
@@ -43,11 +55,12 @@ export function isSelfOrAdjacent(a, b) {
   return sameCoord(a, b) || isAdjacent(a, b);
 }
 
-export function isOnBoard(coord) {
+export function isOnBoard(coord, mapSpec) {
+  const board = createBoard(mapSpec);
   return Boolean(board.getHex(coord));
 }
 
-export function getHexCenter(coord) {
+export function getHexCenter(coord, board) {
   const hex = board.getHex(coord);
   if (!hex) {
     return null;
@@ -56,7 +69,7 @@ export function getHexCenter(coord) {
   return { x: hex.x, y: hex.y };
 }
 
-export function getBoardBounds(padding = 64) {
+export function getBoardBounds(board, padding = 64) {
   const points = board.toArray().flatMap((hex) => hex.corners);
   const xs = points.map((point) => point.x);
   const ys = points.map((point) => point.y);
@@ -75,4 +88,19 @@ export function getBoardBounds(padding = 64) {
 
 export function getHexPoints(hex) {
   return hex.corners;
+}
+
+function hexagonCoordinates(radius, center) {
+  const coords = [];
+
+  for (let q = -radius; q <= radius; q += 1) {
+    const minR = Math.max(-radius, -q - radius);
+    const maxR = Math.min(radius, -q + radius);
+
+    for (let r = minR; r <= maxR; r += 1) {
+      coords.push({ q: q + center.q, r: r + center.r });
+    }
+  }
+
+  return coords;
 }
