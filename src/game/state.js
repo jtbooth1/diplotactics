@@ -35,6 +35,7 @@ export function createUnit(id, name, team, q, r, type = "infantry") {
     type,
     q,
     r,
+    fatigued: false,
     exposed: false,
     alive: true,
   };
@@ -46,7 +47,21 @@ function createInitialStatus(scenario) {
     winner: null,
     reason: null,
     scores: Object.fromEntries(Object.keys(scenario.controllers ?? {}).map((team) => [team, 0])),
+    ruleState: createInitialRuleState(scenario.rules),
   };
+}
+
+function createInitialRuleState(rules) {
+  if (rules.type === "king-of-the-hill") {
+    return {
+      hill: {
+        team: null,
+        turns: 0,
+      },
+    };
+  }
+
+  return {};
 }
 
 export function unitCoord(unit) {
@@ -66,5 +81,6 @@ export function getUnit(state, unitId) {
 }
 
 export function getOrder(state, unitId) {
-  return state.orders[unitId] ?? { type: ORDER_TYPES.HOLD };
+  const unit = getUnit(state, unitId);
+  return state.orders[unitId] ?? { type: ORDER_TYPES.MOVE, target: unit ? unitCoord(unit) : null };
 }

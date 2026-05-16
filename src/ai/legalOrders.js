@@ -1,6 +1,7 @@
 import { ORDER_TYPES } from "../game/constants.js";
 import { DIRECTIONS, addCoord, isOnBoard } from "../game/hex.js";
 import { aliveUnits, unitCoord } from "../game/state.js";
+import { getAvailableOrderTypes } from "../game/unitTypes.js";
 
 export function generateLegalOrdersForUnit(state, unit) {
   if (!unit.alive) {
@@ -9,21 +10,27 @@ export function generateLegalOrdersForUnit(state, unit) {
 
   const from = unitCoord(unit);
   const mapSpec = state.scenario.map;
-  const orders = [
-    { type: ORDER_TYPES.HOLD },
-    ...adjacentCoords(from, mapSpec).map((target) => ({ type: ORDER_TYPES.MOVE, target })),
-  ];
+  const selfAndAdjacent = [from, ...adjacentCoords(from, mapSpec)];
+  const adjacent = adjacentCoords(from, mapSpec);
+  const orders = [];
 
-  if (unit.exposed) {
-    orders.push({ type: ORDER_TYPES.RECOVER });
-    return dedupeOrders(orders);
+  for (const orderType of getAvailableOrderTypes(unit)) {
+    if (orderType === ORDER_TYPES.MOVE) {
+      orders.push(...selfAndAdjacent.map((target) => ({ type: ORDER_TYPES.MOVE, target })));
+    }
+
+    if (orderType === ORDER_TYPES.ATTACK && !unit.exposed) {
+      orders.push(...adjacent.map((target) => ({ type: ORDER_TYPES.ATTACK, target })));
+    }
+
+    if (orderType === ORDER_TYPES.COVER && !unit.exposed) {
+      orders.push(...selfAndAdjacent.map((target) => ({ type: ORDER_TYPES.COVER, target })));
+    }
+
+    if (orderType === ORDER_TYPES.RECOVER) {
+      orders.push({ type: ORDER_TYPES.RECOVER });
+    }
   }
-
-  orders.push(
-    ...adjacentCoords(from, mapSpec).map((target) => ({ type: ORDER_TYPES.ATTACK, target })),
-    { type: ORDER_TYPES.COVER, target: from },
-    ...adjacentCoords(from, mapSpec).map((target) => ({ type: ORDER_TYPES.COVER, target })),
-  );
 
   return dedupeOrders(orders);
 }

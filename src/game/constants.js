@@ -8,7 +8,6 @@ export const ORDER_TYPES = {
   ATTACK: "attack",
   COVER: "cover",
   RECOVER: "recover",
-  HOLD: "hold",
 };
 
 export const ACTION_LABELS = {
@@ -16,5 +15,4 @@ export const ACTION_LABELS = {
   [ORDER_TYPES.ATTACK]: "Attack",
   [ORDER_TYPES.COVER]: "Cover",
   [ORDER_TYPES.RECOVER]: "Recover",
-  [ORDER_TYPES.HOLD]: "Hold",
 };

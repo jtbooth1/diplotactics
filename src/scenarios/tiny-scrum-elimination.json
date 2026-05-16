@@ -1,0 +1,28 @@
+{
+  "id": "tiny-scrum-elimination",
+  "name": "Tiny Scrum",
+  "map": {
+    "shape": "hex",
+    "center": { "q": 0, "r": 0 },
+    "radius": 2
+  },
+  "units": [
+    { "id": "b1", "name": "Blue 1", "team": "blue", "type": "conscript", "q": -1, "r": 0 },
+    { "id": "b2", "name": "Blue 2", "team": "blue", "type": "conscript", "q": -1, "r": 1 },
+    { "id": "b3", "name": "Blue 3", "team": "blue", "type": "conscript", "q": 0, "r": -1 },
+    { "id": "b4", "name": "Blue 4", "team": "blue", "type": "conscript", "q": -2, "r": 1 },
+    { "id": "b5", "name": "Blue 5", "team": "blue", "type": "conscript", "q": 0, "r": -2 },
+    { "id": "r1", "name": "Red 1", "team": "red", "type": "conscript", "q": 0, "r": 0 },
+    { "id": "r2", "name": "Red 2", "team": "red", "type": "conscript", "q": 1, "r": -1 },
+    { "id": "r3", "name": "Red 3", "team": "red", "type": "conscript", "q": 0, "r": 1 },
+    { "id": "r4", "name": "Red 4", "team": "red", "type": "conscript", "q": 1, "r": 0 },
+    { "id": "r5", "name": "Red 5", "team": "red", "type": "conscript", "q": 2, "r": -1 }
+  ],
+  "controllers": {
+    "blue": { "type": "player" },
+    "red": { "type": "ai", "ai": "basic-heuristic" }
+  },
+  "rules": {
+    "type": "elimination"
+  }
+}

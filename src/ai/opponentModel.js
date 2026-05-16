@@ -23,7 +23,7 @@ export function sampleOpponentOrderBundles(state, team, options = {}) {
         .slice(0, perUnitLimit);
 
       const choice = weightedOrders[sampleIndex % weightedOrders.length] ?? weightedOrders[0];
-      bundle[unit.id] = choice?.order ?? { type: ORDER_TYPES.HOLD };
+      bundle[unit.id] = choice?.order ?? { type: ORDER_TYPES.MOVE, target: unitCoord(unit) };
     }
 
     samples.push(bundle);
@@ -38,7 +38,7 @@ function opponentWeight(state, unit, order) {
   const targetEnemy = order.target ? enemies.find((enemy) => enemy.q === order.target.q && enemy.r === order.target.r) : null;
   const targetAlly = order.target ? allies.find((ally) => ally.q === order.target.q && ally.r === order.target.r) : null;
 
-  if (unit.exposed && order.type === ORDER_TYPES.RECOVER) {
+  if (unit.fatigued && order.type === ORDER_TYPES.RECOVER) {
     return 70;
   }
 
@@ -54,5 +54,5 @@ function opponentWeight(state, unit, order) {
     return enemies.some((enemy) => isAdjacent(unitCoord(enemy), order.target)) ? 34 : 18;
   }
 
-  return order.type === ORDER_TYPES.HOLD ? 8 : 12;
+  return order.type === ORDER_TYPES.MOVE && order.target ? 8 : 12;
 }

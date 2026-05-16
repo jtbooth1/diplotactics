@@ -34,7 +34,7 @@ export function scoreOrderLocally(state, unit, order, team = unit.team) {
   let score = 0;
 
   if (order.type === ORDER_TYPES.RECOVER) {
-    score += unit.exposed ? 45 : -10;
+    score += unit.fatigued ? 45 : -10;
   }
 
   if (order.type === ORDER_TYPES.ATTACK) {
@@ -43,18 +43,21 @@ export function scoreOrderLocally(state, unit, order, team = unit.team) {
   }
 
   if (order.type === ORDER_TYPES.COVER) {
-    score += targetAlly?.exposed ? 20 : 7;
-    score += enemies.some((enemy) => order.target && isAdjacent(unitCoord(enemy), order.target)) ? 12 : 0;
+    if (targetAlly) {
+      score += targetAlly.exposed ? 24 : 8;
+      score += enemies.some((enemy) => order.target && isAdjacent(unitCoord(enemy), order.target)) ? 12 : 0;
+    } else {
+      const allyCanMoveIntoTarget = allies.some(
+        (ally) => ally.id !== unit.id && order.target && isAdjacent(unitCoord(ally), order.target),
+      );
+      score += allyCanMoveIntoTarget ? 2 : -12;
+    }
   }
 
   if (order.type === ORDER_TYPES.MOVE && order.target) {
-    score += moveTowardEnemyScore(order.target, enemies);
+    score += sameHex(unit, order.target) ? -2 : moveTowardEnemyScore(order.target, enemies);
     score -= allies.some((ally) => ally.id !== unit.id && sameHex(ally, order.target)) ? 14 : 0;
     score -= unit.exposed && enemies.some((enemy) => isAdjacent(unitCoord(enemy), order.target)) ? 18 : 0;
-  }
-
-  if (order.type === ORDER_TYPES.HOLD) {
-    score -= unit.exposed ? 16 : 2;
   }
 
   return score;

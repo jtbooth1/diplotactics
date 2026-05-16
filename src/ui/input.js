@@ -1,7 +1,8 @@
 import { ACTIONS } from "../game/reducer.js";
 import { ACTION_LABELS, ORDER_TYPES } from "../game/constants.js";
-import { isAdjacent, isSelfOrAdjacent } from "../game/hex.js";
+import { createBoard, getHexCenter, isAdjacent, isSelfOrAdjacent } from "../game/hex.js";
 import { aliveUnits, getOrder, getUnit, unitAt, unitCoord } from "../game/state.js";
+import { getAvailableOrderTypes, getUnitType } from "../game/unitTypes.js";
 import { createRadialMenu } from "./radialMenu.js";
 
 const TARGETED_ACTIONS = new Set([ORDER_TYPES.MOVE, ORDER_TYPES.ATTACK, ORDER_TYPES.COVER]);
@@ -10,7 +11,6 @@ const ICON_BY_ORDER = {
   [ORDER_TYPES.ATTACK]: "Swords",
   [ORDER_TYPES.COVER]: "Shield",
   [ORDER_TYPES.RECOVER]: "RotateCcw",
-  [ORDER_TYPES.HOLD]: "Circle",
 };
 const ACTION_MENU_SIZE = 192;
 const ACTION_MENU_MARGIN = 12;
@@ -34,23 +34,47 @@ export function createBoardHandlers(state, dispatch) {
 
       const clickedUnit = unitAt(state, coord);
       if (clickedUnit) {
+        const position = getHexPanelPosition(state, coord, event);
         dispatch({
           type: ACTIONS.OPEN_ACTION_WHEEL,
           unitId: clickedUnit.id,
-          x: event.clientX,
-          y: event.clientY,
+          selectable: isPlayerControlled(state, clickedUnit),
+          x: position.x,
+          y: position.y,
         });
         return;
       }
 
       dispatch({ type: ACTIONS.CLOSE_ACTION_WHEEL });
     },
+    onBackgroundClick() {
+      dispatch({ type: ACTIONS.CLOSE_ACTION_WHEEL });
+    },
+  };
+}
+
+function getHexPanelPosition(state, coord, event) {
+  const board = createBoard(state.scenario.map);
+  const center = getHexCenter(coord, board);
+  const svg = event.currentTarget.ownerSVGElement;
+  const boardPanel = event.currentTarget.closest(".board-panel");
+  const screenMatrix = svg?.getScreenCTM();
+
+  if (!center || !boardPanel || !screenMatrix) {
+    return { x: event.clientX, y: event.clientY };
+  }
+
+  const panelRect = boardPanel.getBoundingClientRect();
+  const screenPoint = new DOMPoint(center.x, center.y).matrixTransform(screenMatrix);
+
+  return {
+    x: screenPoint.x - panelRect.left,
+    y: screenPoint.y - panelRect.top,
   };
 }
 
 export function renderControls(container, appState, dispatch, scenarioOptions = {}) {
   const state = appState.present;
-  const selectedUnit = getUnit(state, state.selectedUnitId);
   const timelineLength = appState.past.length + 1 + appState.future.length;
   const currentIndex = appState.past.length;
 
@@ -58,7 +82,6 @@ export function renderControls(container, appState, dispatch, scenarioOptions = 
   container.append(
     renderScenarioPanel(state.scenario.id, scenarioOptions),
     renderTurnPanel(state, dispatch),
-    renderRoster(state, selectedUnit, dispatch),
     renderReplayPanel(timelineLength, currentIndex, dispatch),
     renderLog(state),
   );
@@ -76,25 +99,29 @@ export function renderActionWheel(container, state, dispatch) {
     return;
   }
 
+  const canIssueOrders = isPlayerControlled(state, unit);
   const wheel = el("div", {
     className: "action-wheel",
   });
-  const position = clampActionWheelPosition(state.actionWheel.x, state.actionWheel.y);
+  const position = clampActionWheelPosition(state.actionWheel.x, state.actionWheel.y, container);
   wheel.style.left = `${position.x}px`;
   wheel.style.top = `${position.y}px`;
 
   const menu = createRadialMenu({
     className: `action-radial ${unit.team}`,
     label: `Actions for ${unit.name}`,
-    centerLabel: unit.name,
     size: ACTION_MENU_SIZE,
-    items: Object.values(ORDER_TYPES).map((actionType) => ({
+    items: getAvailableOrderTypes(unit).map((actionType) => ({
       id: actionType,
       icon: ICON_BY_ORDER[actionType],
       label: ACTION_LABELS[actionType],
-      disabled: unit.exposed && (actionType === ORDER_TYPES.ATTACK || actionType === ORDER_TYPES.COVER),
+      disabled: !canIssueOrders || (unit.exposed && (actionType === ORDER_TYPES.ATTACK || actionType === ORDER_TYPES.COVER)),
     })),
     onSelect: (item) => {
+      if (!canIssueOrders) {
+        return;
+      }
+
       if (TARGETED_ACTIONS.has(item.id)) {
         dispatch({
           type: ACTIONS.BEGIN_TARGETING,
@@ -116,20 +143,26 @@ export function renderActionWheel(container, state, dispatch) {
   container.append(wheel);
 }
 
-function clampActionWheelPosition(x, y) {
+function isPlayerControlled(state, unit) {
+  return state.scenario.controllers?.[unit.team]?.type === "player";
+}
+
+function clampActionWheelPosition(x, y, container) {
   const radius = ACTION_MENU_SIZE / 2;
+  const bounds = container.getBoundingClientRect();
+
   return {
-    x: clampToViewport(x, radius, window.innerWidth),
-    y: clampToViewport(y, radius, window.innerHeight),
+    x: clampToBounds(x, radius, bounds.width),
+    y: clampToBounds(y, radius, bounds.height),
   };
 }
 
-function clampToViewport(value, radius, viewportSize) {
+function clampToBounds(value, radius, size) {
   const min = radius + ACTION_MENU_MARGIN;
-  const max = viewportSize - radius - ACTION_MENU_MARGIN;
+  const max = size - radius - ACTION_MENU_MARGIN;
 
   if (max < min) {
-    return viewportSize / 2;
+    return size / 2;
   }
 
   return Math.min(Math.max(value, min), max);
@@ -149,9 +182,10 @@ function renderTurnPanel(state, dispatch) {
 
   const targetingUnit = state.targetingOrder ? getUnit(state, state.targetingOrder.unitId) : null;
   const gameOver = state.status.phase === "complete";
+  const hintVisible = state.targetingOrder || gameOver || state.scenario.rules.type !== "elimination";
   panel.append(
     el("p", {
-      className: state.targetingOrder || gameOver ? "targeting-hint" : "targeting-hint hidden",
+      className: hintVisible ? "targeting-hint" : "targeting-hint hidden",
       textContent: getTurnHintText(state, targetingUnit),
     }),
   );
@@ -196,18 +230,59 @@ function renderScenarioPanel(activeScenarioId, { scenarios = [], onScenarioSelec
 
 function getTurnHintText(state, targetingUnit) {
   if (state.status.phase === "complete") {
-    return state.status.winner === "draw" ? "Elimination draw." : `${capitalize(state.status.winner)} wins by elimination.`;
+    return state.status.winner === "draw"
+      ? "Draw."
+      : `${capitalize(state.status.winner)} wins ${formatReason(state.status.reason)}.`;
   }
 
   if (state.targetingOrder) {
     return `Choose ${ACTION_LABELS[state.targetingOrder.orderType].toLowerCase()} target for ${targetingUnit?.name ?? "unit"}.`;
   }
 
-  return "No target selection active.";
+  return getRuleHintText(state);
 }
 
 function capitalize(value) {
   return value[0].toUpperCase() + value.slice(1);
+}
+
+function getRuleHintText(state) {
+  const rules = state.scenario.rules;
+
+  if (rules.type === "king-of-the-hill") {
+    const hill = state.status.ruleState.hill;
+    return hill?.team ? `${capitalize(hill.team)} holds the hill: ${hill.turns}/${rules.requiredTurns ?? 2}.` : "Hold the hill for 2 turns.";
+  }
+
+  if (rules.type === "fortress-attack") {
+    return `${capitalize(rules.attackerTeam)} wins by occupying the flag.`;
+  }
+
+  if (rules.type === "hunter") {
+    return `${capitalize(rules.huntedTeam)} survives after turn ${rules.maxTurns}; ${capitalize(rules.hunterTeam)} wins by elimination.`;
+  }
+
+  return "No target selection active.";
+}
+
+function formatReason(reason) {
+  if (reason === "king-of-the-hill") {
+    return "by holding the hill";
+  }
+
+  if (reason === "fortress-attack") {
+    return "by taking the flag";
+  }
+
+  if (reason === "hunter-elimination") {
+    return "by eliminating the hunted";
+  }
+
+  if (reason === "hunter-timeout") {
+    return "by surviving the hunt";
+  }
+
+  return "by elimination";
 }
 
 function renderRoster(state, selectedUnit, dispatch) {
@@ -226,7 +301,7 @@ function renderRoster(state, selectedUnit, dispatch) {
       el("span", { className: "unit-name", textContent: unit.name }),
       el("span", {
         className: "unit-status",
-        textContent: `${unit.exposed ? "Exposed" : "Steady"} · ${ACTION_LABELS[order.type]}`,
+        textContent: `${getUnitType(unit).label} · ${getUnitStateLabel(unit)} · ${ACTION_LABELS[order.type]}`,
       }),
     );
     list.append(button);
@@ -284,11 +359,23 @@ function isLegalTarget(unit, actionType, target) {
     return isSelfOrAdjacent(from, target);
   }
 
-  if (actionType === ORDER_TYPES.MOVE || actionType === ORDER_TYPES.ATTACK) {
+  if (actionType === ORDER_TYPES.MOVE) {
+    return isSelfOrAdjacent(from, target);
+  }
+
+  if (actionType === ORDER_TYPES.ATTACK) {
     return isAdjacent(from, target);
   }
 
   return false;
+}
+
+function getUnitStateLabel(unit) {
+  if (unit.fatigued) {
+    return "Fatigued";
+  }
+
+  return unit.exposed ? "Exposed" : "Ready";
 }
 
 function el(tagName, props = {}) {

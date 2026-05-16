@@ -41,7 +41,7 @@ function normalizeOrders(state, units) {
     const order = getOrder(state, unit.id);
 
     if (unit.exposed && (order.type === ORDER_TYPES.ATTACK || order.type === ORDER_TYPES.COVER)) {
-      orders[unit.id] = { type: ORDER_TYPES.HOLD };
+      orders[unit.id] = { type: ORDER_TYPES.MOVE, target: unitCoord(unit) };
       continue;
     }
 
@@ -62,8 +62,16 @@ function resolveMovement(units, orders, startOccupancy, unitsById, mapSpec) {
       continue;
     }
 
-    if (!order.target || !isAdjacent(unitCoord(unit), order.target) || !isOnBoard(order.target, mapSpec)) {
+    if (
+      !order.target ||
+      !isSelfOrAdjacent(unitCoord(unit), order.target) ||
+      !isOnBoard(order.target, mapSpec)
+    ) {
       failures.set(unit.id, "invalid move");
+      continue;
+    }
+
+    if (sameCoord(unitCoord(unit), order.target)) {
       continue;
     }
 
@@ -176,7 +184,7 @@ function resolveCombat(units, orders) {
     const order = orders[unit.id];
     const from = unitCoord(unit);
 
-    if (order.type === ORDER_TYPES.RECOVER && unit.exposed) {
+    if (order.type === ORDER_TYPES.RECOVER && unit.fatigued) {
       recoveries.add(unit.id);
       continue;
     }
@@ -227,21 +235,35 @@ function applyCombat(unit, combat) {
   }
 
   if (combat.wounds.has(unit.id)) {
-    return { ...unit, exposed: true };
+    return { ...unit, exposed: true, fatigued: true };
   }
 
   if (combat.recoveries.has(unit.id)) {
-    return { ...unit, exposed: false };
+    return { ...unit, exposed: false, fatigued: false };
   }
 
   return unit;
 }
 
 function evaluateVictory(state, units) {
-  if (state.scenario.rules.type !== "elimination") {
-    return state.status;
+  const rules = state.scenario.rules;
+
+  if (rules.type === "king-of-the-hill") {
+    return evaluateKingOfTheHill(state, units);
   }
 
+  if (rules.type === "fortress-attack") {
+    return evaluateFortressAttack(state, units);
+  }
+
+  if (rules.type === "hunter") {
+    return evaluateHunter(state, units);
+  }
+
+  return evaluateElimination(state, units);
+}
+
+function evaluateElimination(state, units) {
   const startingTeams = [...new Set(state.scenario.units.map((unit) => unit.team))];
   const aliveTeams = new Set(units.map((unit) => unit.team));
   const survivingTeams = startingTeams.filter((team) => aliveTeams.has(team));
@@ -267,6 +289,71 @@ function evaluateVictory(state, units) {
   return state.status;
 }
 
+function evaluateKingOfTheHill(state, units) {
+  const rules = state.scenario.rules;
+  const occupant = units.find((unit) => sameCoord(unitCoord(unit), rules.coord));
+  const previousHill = state.status.ruleState.hill ?? { team: null, turns: 0 };
+  const hill = occupant
+    ? {
+        team: occupant.team,
+        turns: occupant.team === previousHill.team ? previousHill.turns + 1 : 1,
+      }
+    : {
+        team: null,
+        turns: 0,
+      };
+
+  if (hill.team && hill.turns >= (rules.requiredTurns ?? 2)) {
+    return completeStatus(state.status, hill.team, "king-of-the-hill", { hill });
+  }
+
+  return {
+    ...state.status,
+    ruleState: {
+      ...state.status.ruleState,
+      hill,
+    },
+  };
+}
+
+function evaluateFortressAttack(state, units) {
+  const rules = state.scenario.rules;
+  const attackerOnFlag = units.some(
+    (unit) => unit.team === rules.attackerTeam && sameCoord(unitCoord(unit), rules.flag),
+  );
+
+  if (attackerOnFlag) {
+    return completeStatus(state.status, rules.attackerTeam, "fortress-attack");
+  }
+
+  return state.status;
+}
+
+function evaluateHunter(state, units) {
+  const rules = state.scenario.rules;
+  const huntedAlive = units.some((unit) => unit.team === rules.huntedTeam);
+
+  if (!huntedAlive) {
+    return completeStatus(state.status, rules.hunterTeam, "hunter-elimination");
+  }
+
+  if (state.turn >= rules.maxTurns) {
+    return completeStatus(state.status, rules.huntedTeam, "hunter-timeout");
+  }
+
+  return state.status;
+}
+
+function completeStatus(status, winner, reason, ruleState = status.ruleState) {
+  return {
+    ...status,
+    phase: "complete",
+    winner,
+    reason,
+    ruleState,
+  };
+}
+
 function buildTurnLog(turn, movement, combat, status) {
   const moved = [...movement.successes].length;
   const blocked = [...movement.failures.entries()].map(([unitId, reason]) => `${unitId}: ${reason}`);
@@ -279,7 +366,7 @@ function buildTurnLog(turn, movement, combat, status) {
     blocked.length ? `Blocked moves: ${blocked.join(", ")}.` : "No movement blocks.",
     exposed.length ? `Exposed: ${exposed.join(", ")}.` : "No new exposures.",
     killed.length ? `Killed: ${killed.join(", ")}.` : "No deaths.",
-    status.phase === "complete" ? `${formatWinner(status.winner)} wins by elimination.` : null,
+    status.phase === "complete" ? `${formatWinner(status.winner)} wins ${formatReason(status.reason)}.` : null,
   ].filter(Boolean);
 }
 
@@ -289,4 +376,24 @@ function formatWinner(winner) {
   }
 
   return winner[0].toUpperCase() + winner.slice(1);
+}
+
+function formatReason(reason) {
+  if (reason === "king-of-the-hill") {
+    return "by holding the hill";
+  }
+
+  if (reason === "fortress-attack") {
+    return "by taking the flag";
+  }
+
+  if (reason === "hunter-elimination") {
+    return "by eliminating the hunted";
+  }
+
+  if (reason === "hunter-timeout") {
+    return "by surviving the hunt";
+  }
+
+  return "by elimination";
 }

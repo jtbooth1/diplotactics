@@ -30,7 +30,7 @@ export function appReducer(appState, action) {
     case ACTIONS.OPEN_ACTION_WHEEL:
       return withPresent(appState, {
         ...appState.present,
-        selectedUnitId: action.unitId,
+        selectedUnitId: action.selectable ? action.unitId : appState.present.selectedUnitId,
         actionWheel: {
           unitId: action.unitId,
           x: action.x,
@@ -107,7 +107,7 @@ function setOrder(appState, action) {
     target: action.target ?? null,
   };
 
-  if (order.type === ORDER_TYPES.RECOVER || order.type === ORDER_TYPES.HOLD) {
+  if (order.type === ORDER_TYPES.RECOVER) {
     order.target = null;
   }
 
